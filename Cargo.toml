@@ -1,9 +1,26 @@
 [package]
 name = "tonic-server-side-batching"
 version = "0.1.0"
-authors = ["Eric McBride <eric.mcbride@toyotaconnected.com>"]
+authors = ["Eric McBride <ericmcbridedeveloper@gmail.com>"]
 edition = "2018"
+publish = false
+license = "MIT"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "batch-server"
+path = "src/batch/server.rs"
+
+[[bin]]
+name = "batch-client"
+path = "src/batch/client.rs"
 
 [dependencies]
+tonic = "0.1.1"
+prost = "0.6"
+tokio = { version = "0.2", features = ["rt-threaded", "time", "stream", "fs", "sync", "macros", "uds"
+] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+tower = "0.3"
+
+[build-dependencies]
+tonic-build = "0.1.1"
