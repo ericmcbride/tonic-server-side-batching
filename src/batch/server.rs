@@ -73,9 +73,7 @@ async fn batch_scheduler(mut rx: mpsc::Receiver<BatchWrapper>) {
     let mut delay = time::delay_for(Duration::from_millis(5000));
     loop {
         tokio::select! {
-            _ = &mut delay => {
-                println!("Flush the batch every 5 seconds");
-            }
+            _ = &mut delay => {}
             Some(new_req) = rx.recv() => {
                 println!("Received new request");
                 // Here you would add to check the length of a batch, then add to it, or process it
