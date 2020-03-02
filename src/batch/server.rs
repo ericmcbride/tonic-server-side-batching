@@ -4,6 +4,9 @@ use hello_world::greeter_server::{Greeter, GreeterServer};
 use hello_world::{HelloReply, HelloRequest};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, Duration};
+use tracing::{debug, error, event, info, span, warn, Level};
+use tracing_subscriber;
+
 
 pub mod hello_world {
     tonic::include_proto!("helloworld");
@@ -17,9 +20,10 @@ pub struct BatchWrapper {
     req: Request<HelloRequest>,
 }
 
-/// Hello World endpoint 
+/// Hello World endpoint
+#[derive(Debug)]
 pub struct MyGreeter {
-    /// MPSC Sender to send requests to the batch scheduler 
+    /// MPSC Sender to send requests to the batch scheduler
     inbound_sender: mpsc::Sender<BatchWrapper>,
 }
 
@@ -28,11 +32,12 @@ impl Greeter for MyGreeter {
     /// Basic hello function.  Here we create a one shot channel pair (to communicate back after
     /// the batch request) and we create a batch wrapper object and send it over to the
     /// batch_scheduler for processing.  Returns a number
+    #[tracing::instrument]
     async fn say_hello(
         &self,
         request: Request<HelloRequest>,
     ) -> Result<Response<HelloReply>, Status> {
-        println!("request made");
+        //info!("request made");
         let (tx, rx) = oneshot::channel::<i32>();
         let batch_wrapper = BatchWrapper {
             single_shot: tx,
@@ -41,8 +46,7 @@ impl Greeter for MyGreeter {
 
         let _ = self.inbound_sender.clone().send(batch_wrapper).await;
         let resp = rx.await;
-
-        println!("Resp is {:?}", resp);
+        //info!("Resp is {:?}", resp);
         let reply = hello_world::HelloReply {
             message: format!("Number is {}", resp.unwrap()),
         };
@@ -52,6 +56,10 @@ impl Greeter for MyGreeter {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .init();
+
     let addr = "[::1]:50051".parse().unwrap();
     let (inbound_tx, inbound_rx) = mpsc::channel::<BatchWrapper>(100);
 
@@ -68,19 +76,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Background Task to intercept GRPC requests for batching
+#[tracing::instrument]
 async fn batch_scheduler(mut rx: mpsc::Receiver<BatchWrapper>) {
-    println!("Starting batcher");
+    info!("Starting batcher");
+    
     // Replace with a ticker of some sort
     let mut delay = time::delay_for(Duration::from_millis(5000));
     loop {
         tokio::select! {
-            _ = &mut delay => {
-                println!("Flush");
-                delay = time::delay_for(Duration::from_millis(5000));
-                continue
-            }
             Some(new_req) = rx.recv() => {
-                println!("Received new request");
+                //info!("Received new request");
                 // Here you would add to check the length of a batch, then add to it, or process it
                 let _ = new_req.single_shot.send(1);
                 continue

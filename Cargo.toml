@@ -21,6 +21,10 @@ tokio = { version = "0.2", features = ["rt-threaded", "time", "stream", "fs", "s
 ] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 tower = "0.3"
+tracing = "0.1.13"
+tracing-futures = "0.2.3"
+tracing-subscriber = "0.2.2"
+futures-util = "0.3.4"
 
 [build-dependencies]
 tonic-build = "0.1.1"
