@@ -70,10 +70,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Background Task to intercept GRPC requests for batching
 async fn batch_scheduler(mut rx: mpsc::Receiver<BatchWrapper>) {
     println!("Starting batcher");
+    // Replace with a ticker of some sort
     let mut delay = time::delay_for(Duration::from_millis(5000));
     loop {
         tokio::select! {
-            _ = &mut delay => {}
+            _ = &mut delay => {
+                println!("Flush");
+                delay = time::delay_for(Duration::from_millis(5000));
+                continue
+            }
             Some(new_req) = rx.recv() => {
                 println!("Received new request");
                 // Here you would add to check the length of a batch, then add to it, or process it
