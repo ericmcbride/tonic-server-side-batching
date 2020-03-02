@@ -1,5 +1,6 @@
 use hello_world::greeter_client::GreeterClient;
 use hello_world::HelloRequest;
+use futures::future;
 
 pub mod hello_world {
     tonic::include_proto!("helloworld");
@@ -22,12 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }));
     }
 
-    let _ = tokio::task::spawn(async {
-        for task in tasks {
-            task.await.unwrap();
-        }
-    })
-    .await;
+    let _ = future::join_all(tasks).await;
 
     Ok(())
 }
