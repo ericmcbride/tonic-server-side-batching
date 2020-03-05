@@ -54,10 +54,10 @@ impl Greeter for MyGreeter {
 
         // Make sure the header, and value is the same on return to client, will panic
         assert_eq!(header_str, resp);
-
         let reply = hello_world::HelloReply {
             message: format!("Number is {}-{}", resp, header_str),
         };
+
         Ok(Response::new(reply))
     }
 }
@@ -82,6 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(svc)
         .serve(addr)
         .await?;
+
     Ok(())
 }
 
@@ -98,19 +99,23 @@ async fn batch_scheduler(mut rx: mpsc::Receiver<RequestWrapper>) {
     loop {
         tokio::select! {
             _ = &mut delay => {
-                let len = cons.len();
-                let _ = batch_fan_out(&mut cons, len).unwrap();
-                delay = tokio::time::delay_for(Duration::from_millis(500));
-                continue
+                let cons_len = cons.len();
+                if cons_len == 0 {
+                    continue;
+                }
+                println!("Actually hit time buffer with this many requests {}", cons_len);
+                let _ = batch_fan_out(&mut cons, cons_len).unwrap();
             }
 
             Some(new_req) = rx.recv() => {
                 prod.push(new_req).unwrap();
-                let _ = batch_fan_out(&mut cons, 10).unwrap();
-                delay = tokio::time::delay_for(Duration::from_millis(500));
-                continue
+                if cons.len() == 10 {
+                    let _ = batch_fan_out(&mut cons, 10).unwrap();
+                }
             }
+
         }
+        delay = tokio::time::delay_for(Duration::from_millis(500));
     }
 }
 
@@ -126,7 +131,7 @@ fn batch_fan_out(cons: &mut ringbuf::Consumer<RequestWrapper>, size: usize) -> R
     let results = batch_request(&batch_vec)?;
     for result in results.into_iter() {
         let chan = batch_vec.pop_front().unwrap();
-        let _ = chan.single_shot.send(result);
+        let _ = chan.single_shot.send(result)?;
     }
     Ok(())
 }
