@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = GreeterClient::connect("http://[::1]:50051").await?;
     let mut tasks = vec![];
 
-    for n in 1..10001 {
+    for n in 1..10000 {
         let mut client = client.clone();
         let request = tonic::Request::new(HelloRequest {
             name: format!("Tonic-{}", n),

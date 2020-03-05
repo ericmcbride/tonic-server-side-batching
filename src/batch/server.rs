@@ -8,8 +8,10 @@ use tracing_subscriber;
 use uuid::Uuid;
 use ringbuf::RingBuffer;
 use std::collections::VecDeque;
+use std::time::Duration;
 
 
+// #TODO: Take care of unwraps on tonic statuses
 pub mod hello_world {
     tonic::include_proto!("helloworld");
 }
@@ -42,19 +44,19 @@ impl Greeter for MyGreeter {
         let (tx, rx) = oneshot::channel::<String>();
         let header_resp = request.metadata().get("extra-id".to_string()).unwrap().as_bytes();
         let header_str = std::str::from_utf8(header_resp).unwrap().to_string();
-    
+
         let mut request_wrapper = RequestWrapper {
             single_shot: tx,
             req: request,
         };
         let _ = self.inbound_sender.clone().send(request_wrapper).await;
         let resp = rx.await.unwrap();
-        
-        // Make sure the header, and value is the same on return to client
+
+        // Make sure the header, and value is the same on return to client, will panic
         assert_eq!(header_str, resp);
 
         let reply = hello_world::HelloReply {
-            message: format!("Number is {}", resp),
+            message: format!("Number is {}-{}", resp, header_str),
         };
         Ok(Response::new(reply))
     }
@@ -66,13 +68,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(Level::INFO)
         .init();
 
-    let addr = "[::1]:50051".parse().unwrap();
+    let addr = "[::1]:50051".parse()?;
     let (inbound_tx, inbound_rx) = mpsc::channel::<RequestWrapper>(10000);
 
     let greeter = MyGreeter {
         inbound_sender: inbound_tx,
     };
-    
+
     let svc = GreeterServer::with_interceptor(greeter, header_interceptor);
 
     tokio::spawn(async move { batch_scheduler(inbound_rx).await });
@@ -87,41 +89,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[tracing::instrument]
 async fn batch_scheduler(mut rx: mpsc::Receiver<RequestWrapper>) {
     info!("Starting batcher");
-    
+
     let buff = RingBuffer::<RequestWrapper>::new(1000000);
     let (mut prod, mut cons) = buff.split();
-    
-    // TODO: Add intervals (flush times i.e. if buffers not full in 250ms make requests regardless
-    // of buffer length
+
+    // TODO: Dont use delay use some kind of interval ticker
+    let mut delay = tokio::time::delay_for(Duration::from_millis(500));
     loop {
         tokio::select! {
+            _ = &mut delay => {
+                let len = cons.len();
+                let _ = batch_fan_out(&mut cons, len).unwrap();
+                delay = tokio::time::delay_for(Duration::from_millis(500));
+                continue
+            }
+
             Some(new_req) = rx.recv() => {
                 prod.push(new_req).unwrap();
-                if cons.len() == 10 {
-                    let mut batch_vec = VecDeque::new();
-                    let collector = |val| {
-                        batch_vec.push_back(val);
-                        true
-                    };
-                    let _ = cons.pop_each(collector, Some(10));
-                    
-                    // batch request will conbsume batch_vec
-                    let results = batch_request(&batch_vec).unwrap();
-                    for result in results.into_iter() {
-                        let chan = batch_vec.pop_front().unwrap();
-                        let _ = chan.single_shot.send(result);
-                    }
-                }
-                
+                let _ = batch_fan_out(&mut cons, 10).unwrap();
+                delay = tokio::time::delay_for(Duration::from_millis(500));
                 continue
             }
         }
     }
 }
 
+/// Function that will send the requests back to their respected client request
+fn batch_fan_out(cons: &mut ringbuf::Consumer<RequestWrapper>, size: usize) -> Result<(), Box<dyn std::error::Error>>{
+    let mut batch_vec = VecDeque::new();
+    let collector = |val| {
+        batch_vec.push_back(val);
+        true
+    };
+
+    let _ = cons.pop_each(collector, Some(size));
+    let results = batch_request(&batch_vec)?;
+    for result in results.into_iter() {
+        let chan = batch_vec.pop_front().unwrap();
+        let _ = chan.single_shot.send(result);
+    }
+    Ok(())
+}
+
 /// gRPC Interceptor used to Implement Custom id for fan out method in the batch scheduler.  This
 /// can be deleted, only making sure order is preserved in this implementation
-#[tracing::instrument]
 fn header_interceptor(mut req: Request<()>) -> Result<Request<()>, Status> {
     let id = Uuid::new_v4().to_hyphenated().to_string();
     req.metadata_mut().insert("extra-id", id.parse().unwrap());
@@ -129,12 +140,11 @@ fn header_interceptor(mut req: Request<()>) -> Result<Request<()>, Status> {
 }
 
 /// Simulates posting a batch request, then returning a batch request
-#[tracing::instrument]
 fn batch_request(batch: &VecDeque<RequestWrapper>) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut req_vec = vec![];
     for r in batch.iter() {
         let val = r.req.metadata().get("extra-id".to_string()).unwrap().as_bytes();
-        req_vec.push(std::str::from_utf8(val).unwrap().to_string());
+        req_vec.push(std::str::from_utf8(val)?.to_string());
     }
     Ok(req_vec)
 }
