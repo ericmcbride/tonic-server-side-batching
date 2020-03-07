@@ -1,9 +1,10 @@
 use tonic::{transport::Server, Request, Response, Status};
+use tonic::Code;
 
 use hello_world::greeter_server::{Greeter, GreeterServer};
 use hello_world::{HelloReply, HelloRequest};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{info, Level};
+use tracing::{debug, info, Level};
 use tracing_subscriber;
 use uuid::Uuid;
 use ringbuf::RingBuffer;
@@ -11,7 +12,6 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 
-// #TODO: Take care of unwraps on tonic statuses
 pub mod hello_world {
     tonic::include_proto!("helloworld");
 }
@@ -49,16 +49,20 @@ impl Greeter for MyGreeter {
             single_shot: tx,
             req: request,
         };
+
         let _ = self.inbound_sender.clone().send(request_wrapper).await;
-        let resp = rx.await.unwrap();
-
-        // Make sure the header, and value is the same on return to client, will panic
-        assert_eq!(header_str, resp);
-        let reply = hello_world::HelloReply {
-            message: format!("Number is {}-{}", resp, header_str),
-        };
-
-        Ok(Response::new(reply))
+        match rx.await {
+            Ok(result) => {
+                let reply = hello_world::HelloReply {
+                    message: format!("Number is {}-{}", result, header_str),
+                };
+                Ok(Response::new(reply))
+            }
+            Err(e) => {
+                let status = Status::new(Code::Aborted, format!("Single Shot closed {}", e));
+                Err(status)
+            }
+        }
     }
 }
 
@@ -69,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let addr = "[::1]:50051".parse()?;
-    let (inbound_tx, inbound_rx) = mpsc::channel::<RequestWrapper>(10000);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<RequestWrapper>(100000000);
 
     let greeter = MyGreeter {
         inbound_sender: inbound_tx,
@@ -91,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn batch_scheduler(mut rx: mpsc::Receiver<RequestWrapper>) {
     info!("Starting batcher");
 
-    let buff = RingBuffer::<RequestWrapper>::new(1000000);
+    let buff = RingBuffer::<RequestWrapper>::new(10000000000);
     let (mut prod, mut cons) = buff.split();
 
     // TODO: Dont use delay use some kind of interval ticker
@@ -103,17 +107,16 @@ async fn batch_scheduler(mut rx: mpsc::Receiver<RequestWrapper>) {
                 if cons_len == 0 {
                     continue;
                 }
-                println!("Actually hit time buffer with this many requests {}", cons_len);
-                let _ = batch_fan_out(&mut cons, cons_len).unwrap();
+                debug!("Batch Buffer timeout hit with {} requests", cons_len);
+                let _ = batch_fan_out(&mut cons, cons_len);
             }
 
             Some(new_req) = rx.recv() => {
                 prod.push(new_req).unwrap();
-                if cons.len() == 10 {
-                    let _ = batch_fan_out(&mut cons, 10).unwrap();
+                if cons.len() == 1000 {
+                    let _ = batch_fan_out(&mut cons, 1000);
                 }
             }
-
         }
         delay = tokio::time::delay_for(Duration::from_millis(500));
     }
