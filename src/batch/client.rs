@@ -45,8 +45,13 @@ fn f_50_parallel_requests(b: &mut test::bench::Bencher) {
 }
 
 #[bench]
-fn f_10_parallel_requests(b: &mut test::bench::Bencher) {
-    bench_requests(b, 10);
+fn f_100_parallel_requests(b: &mut test::bench::Bencher) {
+    bench_requests(b, 100);
+}
+
+#[bench]
+fn f_1000_parallel_requests(b: &mut test::bench::Bencher) {
+    bench_requests(b, 1000);
 }
 
 #[tokio::main]
