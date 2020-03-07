@@ -1,4 +1,4 @@
-### Tonic Server Side Batching
+### Tonic Server Side Batching (Must have Nightly Running)
 
 Sometimes you need to batch some gRPC requests to do some computations somewhere.  Here is a vanilla example of how to do that.
 
